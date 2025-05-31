@@ -1,7 +1,7 @@
 import { ChevronDown, LogOut, MessageSquare, UserCircle2 } from 'lucide-react';
 import { Link } from 'react-router';
 import { useDispatch } from 'react-redux';
-import { logout } from '../../../features/auth/slices/authSlice';
+import { logoutUser } from '../../../features/auth/slices/authSlice';
 import { getUserFromStorage } from '../../../utils';
 
 const UserMenu = () => {
@@ -31,7 +31,7 @@ const UserMenu = () => {
           </Link>
         </li>
         <li>
-          <button onClick={() => dispatch(logout())} className="gap-3">
+          <button onClick={() => dispatch(logoutUser())} className="gap-3">
             <LogOut className="w-4 h-4" /> Logout
           </button>
         </li>

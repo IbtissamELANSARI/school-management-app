@@ -1,62 +1,28 @@
-import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
-import { supabase } from '../../../services/supabaseClient';
+import { createSlice, createAsyncThunk, isAnyOf } from '@reduxjs/toolkit';
+import apiClient from '../../../api/axios';
 
-// Constants
+// --- Constants for Storage Keys ---
 const STORAGE_KEYS = {
-  TOKEN: 'token',
-  REFRESH_TOKEN: 'refresh_token',
   USER: 'user',
   REMEMBER_ME: 'remember_me',
 };
 
-// Utility Functions
-const validatePassword = (password) => {
-  const errors = [];
-  if (!password || typeof password !== 'string') {
-    errors.push('Password is required and must be a string');
-    return errors;
-  }
+// --- Utility Functions for Local/Session Storage ---
+const getStorage = (rememberMe) => (rememberMe ? localStorage : sessionStorage);
 
-  if (password.length < 8) {
-    errors.push('Password must be at least 8 characters long');
-  }
-  if (!/[A-Z]/.test(password)) {
-    errors.push('Password must contain at least one uppercase letter');
-  }
-  if (!/[a-z]/.test(password)) {
-    errors.push('Password must contain at least one lowercase letter');
-  }
-  if (!/\d/.test(password)) {
-    errors.push('Password must contain at least one number');
-  }
-  if (!/[!@#$%^&*(),.?":{}|<>]/.test(password)) {
-    errors.push('Password must contain at least one special character');
-  }
-  return errors;
-};
-
-const validateEmail = (email) => {
-  if (!email || typeof email !== 'string') {
-    return 'Email is required and must be a string';
-  }
-
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  if (!emailRegex.test(email)) {
-    return 'Invalid email format';
-  }
-  return null;
-};
-
-const getStorageItem = (key, storage = localStorage) => {
+const getStorageItem = (key, rememberMe) => {
+  const storage = getStorage(rememberMe);
   try {
-    return JSON.parse(storage.getItem(key));
+    const item = storage.getItem(key);
+    return item ? JSON.parse(item) : null;
   } catch (error) {
     console.error(`Error retrieving ${key} from storage:`, error);
     return null;
   }
 };
 
-const setStorageItem = (key, value, storage = localStorage) => {
+const setStorageItem = (key, value, rememberMe) => {
+  const storage = getStorage(rememberMe);
   try {
     storage.setItem(key, JSON.stringify(value));
   } catch (error) {
@@ -64,205 +30,219 @@ const setStorageItem = (key, value, storage = localStorage) => {
   }
 };
 
-// Authentication Thunks
-export const signup = createAsyncThunk('auth/signup', async (userData, { rejectWithValue }) => {
+const removeStorageItem = (key, rememberMe) => {
+  const storage = getStorage(rememberMe);
   try {
-    const { email, password, name, role, profile_picture } = userData;
-
-    // Validate email and password
-    const emailError = validateEmail(email);
-    if (emailError) {
-      throw new Error(emailError);
-    }
-
-    const passwordErrors = validatePassword(password);
-    if (passwordErrors.length > 0) {
-      throw new Error(passwordErrors.join('. '));
-    }
-
-    // Check if user exists
-    const { data: existingUsers, error: checkError } = await supabase
-      .from('users')
-      .select('*')
-      .eq('email', email);
-
-    if (checkError) {
-      throw checkError;
-    }
-
-    if (existingUsers.length > 0) {
-      throw new Error('Email already registered');
-    }
-
-    // Create new user in Supabase users table
-    const { data: newUserResponse, error: insertError } = await supabase
-      .from('users')
-      .insert({
-        email,
-        password,
-        name,
-        role,
-        created_at: new Date().toISOString(),
-        status: 'active',
-      })
-      .select()
-      .single();
-
-    if (insertError) {
-      throw insertError;
-    }
-
-    // Prepare user data for storage
-    const userDataToStore = {
-      id: newUserResponse.id,
-      name: newUserResponse.name,
-      email: newUserResponse.email,
-      role: newUserResponse.role,
-    };
-
-    // Store in localStorage (default for signup)
-    localStorage.setItem(STORAGE_KEYS.REMEMBER_ME, 'true');
-    setStorageItem(STORAGE_KEYS.USER, userDataToStore);
-    setStorageItem(STORAGE_KEYS.TOKEN, `dummy-token-${Date.now()}`);
-
-    return {
-      user: userDataToStore,
-      token: `dummy-token-${Date.now()}`,
-      rememberMe: true,
-    };
+    storage.removeItem(key);
   } catch (error) {
-    return rejectWithValue(error.message || 'Signup failed');
+    console.error(`Error removing ${key} from storage:`, error);
   }
-});
+};
 
-export const login = createAsyncThunk('auth/login', async (credentials, { rejectWithValue }) => {
-  try {
-    const { email, password, rememberMe = false } = credentials;
-    const emailError = validateEmail(email);
-
-    if (emailError) {
-      throw new Error(emailError);
+// --- Helper to Extract Laravel Error Messages ---
+const getLaravelErrorMessage = (error, defaultMessage) => {
+  if (error.response?.data) {
+    // Laravel validation errors (often nested under 'errors')
+    if (error.response.data.errors) {
+      // Flatten all validation messages into a single string
+      return Object.values(error.response.data.errors)
+        .flat()
+        .filter(msg => typeof msg === 'string') // Ensure messages are strings
+        .join(' ');
     }
-
-    if (!password) {
-      throw new Error('Password is required');
+    // General error message from Laravel (e.g., 'Unauthenticated.', 'CSRF token mismatch.')
+    if (error.response.data.message) {
+      return error.response.data.message;
     }
-
-    // Fetch user from Supabase users table
-    const { data: users, error: fetchError } = await supabase
-      .from('users')
-      .select('*, roles(name)')
-      .eq('email', email)
-      .limit(1);
-
-    if (fetchError) {
-      throw fetchError;
-    }
-
-    const user = users[0];
-
-    if (!user) {
-      throw new Error('Invalid email or password');
-    }
-
-    if (user.password !== password) {
-      throw new Error('Invalid email or password');
-    }
-
-    // Choose storage based on remember me
-    const storage = rememberMe ? localStorage : sessionStorage;
-
-    // Store remember me preference
-    localStorage.setItem(STORAGE_KEYS.REMEMBER_ME, JSON.stringify(rememberMe));
-
-    // Clear inconsistent storage
-    if (!rememberMe) {
-      localStorage.removeItem(STORAGE_KEYS.TOKEN);
-      localStorage.removeItem(STORAGE_KEYS.USER);
-    }
-
-    // Prepare user data
-    const userData = {
-      id: user.id,
-      name: user.name,
-      email: user.email,
-      role: user.roles.name,
-      profile_picture: user.profile_picture,
-      status: user.status,
-      created_at: user.created_at,
-      last_login: user.last_login,
-      phone_number: user.phone_number,
-      bio: user.bio,
-      website: user.website,
-      address: user.address,
-    };
-
-    // Generate token (dummy in this example)
-    const token = `dummy-token-${Date.now()}-${Math.random().toString(36).substring(7)}`;
-
-    // Store tokens and user data
-    setStorageItem(STORAGE_KEYS.TOKEN, token, storage);
-    setStorageItem(STORAGE_KEYS.USER, userData, storage);
-
-    return {
-      token,
-      user: userData,
-      rememberMe,
-    };
-  } catch (error) {
-    return rejectWithValue(error.message || 'Login failed');
   }
-});
+  // Fallback for network errors or unhandled API responses
+  return error.message || defaultMessage;
+};
 
-// Determine initial authentication state
-const getInitialAuthState = () => {
-  const rememberMe = JSON.parse(localStorage.getItem(STORAGE_KEYS.REMEMBER_ME) || 'false');
-
-  // If remember me is true, check localStorage, else check sessionStorage
-  const storage = rememberMe ? localStorage : sessionStorage;
-
-  const user = getStorageItem(STORAGE_KEYS.USER, storage);
-  const token = storage.getItem(STORAGE_KEYS.TOKEN);
-
+// --- User Data Preparation ---
+// Centralized function to prepare user data from Laravel's /api/user response
+const prepareUserData = (laravelUser) => {
+  if (!laravelUser) return null;
   return {
-    user,
-    token,
-    isAuthenticated: !!token,
-    rememberMe,
+    id: laravelUser.id,
+    name: laravelUser.name,
+    email: laravelUser.email,
+    roles: laravelUser.roles || [], // Assuming roles are returned as an array
+    permissions: laravelUser.permissions || [], // Assuming permissions are returned as an array
+    // Add other relevant user fields as returned by Laravel's /api/user endpoint
+    // e.g., role: laravelUser.role, profile_picture: laravelUser.profile_picture,
   };
 };
 
-// Initial state
+// --- Authentication Thunks ---
+
+/**
+ * Thunk for user registration.
+ * Handles API call for signup and stores user data on success.
+ */
+export const signup = createAsyncThunk(
+  'auth/signup',
+  async (userData, { rejectWithValue }) => {
+    try {
+      const { name, email, password, password_confirmation } = userData;
+
+      // Laravel Breeze API stack registration endpoint is usually '/register'
+      // Ensure this matches your Laravel routes (typically in web.php for SPAs)
+      await apiClient.post('/register', {
+        name,
+        email,
+        password,
+        password_confirmation,
+      });
+
+      // After successful registration, Laravel (with Breeze/Fortify) typically
+      // logs the user in and establishes a session. Fetch user details.
+      const userResponse = await apiClient.get('/user'); // Or '/api/user' if your route is prefixed
+      const user = prepareUserData(userResponse.data);
+
+      if (!user) {
+        return rejectWithValue('User data not found after signup.');
+      }
+
+      // Default to remember on signup for convenience, or adjust based on UX
+      const rememberMe = true;
+      setStorageItem(STORAGE_KEYS.REMEMBER_ME, rememberMe);
+      setStorageItem(STORAGE_KEYS.USER, user, rememberMe);
+
+      return { user, isAuthenticated: true, rememberMe };
+    } catch (error) {
+      console.error('Signup API error:', error);
+      return rejectWithValue(getLaravelErrorMessage(error, 'Signup failed. Please try again.'));
+    }
+  }
+);
+
+/**
+ * Thunk for user login.
+ * Handles API call for login and stores user data on success.
+ */
+export const login = createAsyncThunk(
+  'auth/login',
+  async (credentials, { rejectWithValue }) => {
+    try {
+      const { email, password, rememberMe = false } = credentials;
+
+      // Laravel Breeze API stack login endpoint is usually '/login'
+      // Ensure this matches your Laravel routes (typically in web.php for SPAs)
+      await apiClient.post('/login', {
+        email,
+        password,
+        remember: rememberMe, // Laravel Fortify/Breeze expects 'remember' field
+      });
+
+      // Fetch authenticated user data from Laravel (after successful login)
+      const userResponse = await apiClient.get('/api/user'); // Or '/api/user' if your route is prefixed
+      const user = prepareUserData(userResponse.data);
+
+      if (!user) {
+        return rejectWithValue('User data not found after login.');
+      }
+
+      // Store user data based on 'rememberMe' preference
+      setStorageItem(STORAGE_KEYS.REMEMBER_ME, rememberMe);
+      // Clear the other storage type to avoid inconsistent state
+      if (rememberMe) {
+        removeStorageItem(STORAGE_KEYS.USER, false); // Clear sessionStorage if remembering
+      } else {
+        removeStorageItem(STORAGE_KEYS.USER, true); // Clear localStorage if not remembering
+      }
+      setStorageItem(STORAGE_KEYS.USER, user, rememberMe);
+
+      return { user, isAuthenticated: true, rememberMe };
+    } catch (error) {
+      console.error('Login API error:', error);
+      return rejectWithValue(getLaravelErrorMessage(error, 'Login failed. Please check your credentials.'));
+    }
+  }
+);
+
+/**
+ * Thunk to check current authentication status (e.g., on app load).
+ * Attempts to fetch user data, implies authentication if successful.
+ */
+export const checkAuth = createAsyncThunk(
+  'auth/checkAuth',
+  async (_, { rejectWithValue }) => {
+    try {
+      const userResponse = await apiClient.get('/user'); // Or '/api/user'
+      const user = prepareUserData(userResponse.data);
+
+      if (!user) {
+        throw new Error('Not authenticated or user data missing.');
+      }
+
+      // Determine rememberMe based on stored preference
+      const rememberMe = getStorageItem(STORAGE_KEYS.REMEMBER_ME, true) || false; // Check localStorage first
+      setStorageItem(STORAGE_KEYS.USER, user, rememberMe); // Update storage if needed
+
+      return { user, isAuthenticated: true, rememberMe };
+    } catch (error) {
+      console.warn('Authentication check failed (user likely not logged in or session expired):', error.message);
+      // Clear all potentially stale auth data from both storage types
+      removeStorageItem(STORAGE_KEYS.USER, true); // localStorage
+      removeStorageItem(STORAGE_KEYS.USER, false); // sessionStorage
+      removeStorageItem(STORAGE_KEYS.REMEMBER_ME); // localStorage
+      return rejectWithValue('User not authenticated.');
+    }
+  }
+);
+
+/**
+ * Thunk for user logout.
+ * Handles API call for logout and dispatches client-side state reset.
+ */
+export const logoutUser = createAsyncThunk(
+  'auth/logoutUser',
+  async (_, { dispatch, rejectWithValue }) => {
+    try {
+      // Laravel Breeze API stack logout endpoint is usually '/logout'
+      await apiClient.post('/logout');
+      console.log('API logout successful.');
+      dispatch(authSlice.actions.logoutClient()); // Clear client state
+      return true; // Indicate success
+    } catch (error) {
+      console.error('API logout error:', error);
+      // Even if API logout fails, clear client state to prevent perceived login
+      dispatch(authSlice.actions.logoutClient());
+      return rejectWithValue(getLaravelErrorMessage(error, 'Logout failed.'));
+    }
+  }
+);
+
+
+// --- Initial State ---
+const initialRememberMe = getStorageItem(STORAGE_KEYS.REMEMBER_ME, true) || false; // Check localStorage first
+const initialUser = getStorageItem(STORAGE_KEYS.USER, initialRememberMe); // Load from preferred storage
+
 const initialState = {
-  ...getInitialAuthState(),
-  status: 'idle',
+  user: initialUser,
+  isAuthenticated: !!initialUser,
+  rememberMe: initialRememberMe,
+  status: 'idle', // 'idle' | 'loading' | 'succeeded' | 'failed'
   error: null,
 };
 
-// Auth Slice
+// --- Auth Slice ---
 const authSlice = createSlice({
   name: 'auth',
   initialState,
   reducers: {
-    logout: (state) => {
-      try {
-        // Remove from both local and session storage
-        localStorage.removeItem(STORAGE_KEYS.TOKEN);
-        localStorage.removeItem(STORAGE_KEYS.USER);
-        localStorage.removeItem(STORAGE_KEYS.REMEMBER_ME);
-        sessionStorage.removeItem(STORAGE_KEYS.TOKEN);
-        sessionStorage.removeItem(STORAGE_KEYS.USER);
-      } catch (error) {
-        console.error('Error during logout:', error);
-      }
-
-      return {
-        ...initialState,
-        user: null,
-        token: null,
-        isAuthenticated: false,
-        rememberMe: false,
-      };
+    // Synchronous action to clear client-side authentication state.
+    // Can be dispatched directly or by thunks.
+    logoutClient: (state) => {
+      removeStorageItem(STORAGE_KEYS.USER, true); // From localStorage
+      removeStorageItem(STORAGE_KEYS.USER, false); // From sessionStorage
+      removeStorageItem(STORAGE_KEYS.REMEMBER_ME); // From localStorage
+      state.user = null;
+      state.isAuthenticated = false;
+      state.rememberMe = false;
+      state.status = 'idle';
+      state.error = null;
     },
     clearError: (state) => {
       state.error = null;
@@ -270,40 +250,55 @@ const authSlice = createSlice({
   },
   extraReducers: (builder) => {
     builder
-      // Login cases
-      .addCase(login.pending, (state) => {
-        state.status = 'loading';
-        state.error = null;
-      })
-      .addCase(login.fulfilled, (state, action) => {
+      // Handle fulfilled state for checkAuth (similar to login/signup fulfilled, but might need distinct handling)
+      .addCase(checkAuth.fulfilled, (state, action) => {
         state.status = 'succeeded';
         state.user = action.payload.user;
-        state.token = action.payload.token;
         state.isAuthenticated = true;
         state.rememberMe = action.payload.rememberMe;
+        state.error = null; // Ensure error is null if auth check succeeds
       })
-      .addCase(login.rejected, (state, action) => {
-        state.status = 'failed';
-        state.error = action.payload;
-      })
-      // Signup cases
-      .addCase(signup.pending, (state) => {
-        state.status = 'loading';
+      // Handle fulfilled state for logoutUser (state is already cleared by logoutClient dispatch)
+      .addCase(logoutUser.fulfilled, (state) => {
+        state.status = 'idle'; // Set status, client state cleared by logoutClient
         state.error = null;
       })
-      .addCase(signup.fulfilled, (state, action) => {
-        state.status = 'succeeded';
-        state.user = action.payload.user;
-        state.token = action.payload.token;
-        state.isAuthenticated = true;
-        state.rememberMe = action.payload.rememberMe;
-      })
-      .addCase(signup.rejected, (state, action) => {
-        state.status = 'failed';
-        state.error = action.payload;
-      });
+      // Handle pending state for all auth thunks
+      .addMatcher(
+        isAnyOf(signup.pending, login.pending, checkAuth.pending, logoutUser.pending),
+        (state) => {
+          state.status = 'loading';
+          state.error = null; // Clear previous errors on new request
+        }
+      )
+      // Handle fulfilled state for login and signup
+      .addMatcher(
+        isAnyOf(login.fulfilled, signup.fulfilled),
+        (state, action) => {
+          state.status = 'succeeded';
+          state.user = action.payload.user;
+          state.isAuthenticated = true;
+          state.rememberMe = action.payload.rememberMe;
+        }
+      )
+      // Handle rejected state for all auth thunks
+      .addMatcher(
+        isAnyOf(signup.rejected, login.rejected, checkAuth.rejected, logoutUser.rejected),
+        (state, action) => {
+          state.status = 'failed';
+          state.error = action.payload || 'An unknown error occurred.';
+
+          // For rejected login/signup/checkAuth, ensure user state is cleared
+          if (isAnyOf(signup.rejected, login.rejected, checkAuth.rejected)(action)) {
+            state.isAuthenticated = false;
+            state.user = null;
+            state.rememberMe = false; // Reset rememberMe preference too
+          }
+          // For logoutUser.rejected, client state is already cleared by logoutClient dispatch
+        }
+      );
   },
 });
 
-export const { logout, clearError } = authSlice.actions;
+export const { clearError, logoutClient } = authSlice.actions;
 export default authSlice.reducer;

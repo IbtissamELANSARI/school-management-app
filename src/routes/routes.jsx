@@ -35,7 +35,7 @@ import {
 import { getUserFromStorage } from '../utils';
 
 const ROLES = {
-  SUPER_USER: 'super user',
+  SUPER_USER: 'super-admin',
   ADMIN: 'admin',
   TRAINER: 'trainer',
   TRAINEE: 'trainee',

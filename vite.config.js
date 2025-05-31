@@ -7,8 +7,20 @@ export default defineConfig(({ command }) => {
 
   const config = {
     plugins: [react(), svgr()],
+    server: {
+      host: 'localhost',
+      port: 3000
+    },
     build: {
       outDir: 'docs',
+    },
+    resolve: {
+      alias: {
+        '@': '/src', // Adjust this path based on your project structure
+      },
+    },
+    optimizeDeps: {
+      include: ['react', 'react-dom', 'react-router', 'axios'], // Include necessary dependencies
     },
   }
 

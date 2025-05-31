@@ -100,7 +100,7 @@ const SidebarContent = memo(({ menuItems, userData, isSidebarOpen }) => (
       <div className="p-4 border-t border-base-200">
         <UserProfile
           name={userData?.name ?? 'Guest'}
-          role={userData?.role ?? 'User'}
+          role={userData?.roles[0] ?? 'User'}
           profile_picture={userData?.profile_picture}
         />
       </div>
@@ -116,8 +116,8 @@ const Sidebar = memo(() => {
   const userData = getUserFromStorage('user');
 
   const filteredMenuItems = useMemo(
-    () => getFilteredMenuItems(userData?.role ?? 'user', menuItems),
-    [userData?.role]
+    () => getFilteredMenuItems(userData?.roles[0] ?? 'user', menuItems),
+    [userData?.roles[0]]
   );
 
   useSidebarCloseHandlers(sidebarRef, isSidebarOpen, setIsSidebarOpen, isMobile);

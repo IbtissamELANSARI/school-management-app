@@ -1,5 +1,6 @@
+// your-hook-file.js
 import { useState, useEffect } from 'react';
-import { SecteursService } from '../../../services/supabaseService';
+import SecteursService from '../../../services/secteursService'; // Adjust this path!
 
 export const useSecteursLogic = () => {
   const [secteurs, setSecteurs] = useState([]);
@@ -22,10 +23,6 @@ export const useSecteursLogic = () => {
 
   useEffect(() => {
     loadSecteurs();
-    const unsubscribe = SecteursService.subscribeToChanges(() => {
-      loadSecteurs();
-    });
-    return () => unsubscribe();
   }, []);
 
   useEffect(() => {
@@ -34,11 +31,12 @@ export const useSecteursLogic = () => {
 
   const loadSecteurs = async () => {
     try {
-      const data = await SecteursService.getAll();
+      const data = await SecteursService.getAll(); // Using the new service
       setSecteurs(data);
       updateFilterOptions(data);
     } catch (error) {
       console.error('Failed to load secteurs:', error);
+      // You might want to display an error message to the user
     }
   };
 
@@ -92,14 +90,17 @@ export const useSecteursLogic = () => {
     }));
   };
 
+  // --- Debounced Search (Client-Side Filtering) ---
+  // If you wish to implement server-side search, you'd modify this useEffect
+  // to call `SecteursService.search` and update `secteurs` state directly.
   useEffect(() => {
     const timeoutId = setTimeout(() => {
-      if (searchTerm.length >= 3) {
-        SecteursService.search('intitule', searchTerm).then(setSecteurs);
-      } else if (searchTerm.length === 0) {
-        loadSecteurs();
-      }
-    }, 300); // Debounce search
+      // Example for server-side search (if your API supports it):
+      // if (searchTerm.length >= 3 || searchTerm.length === 0) {
+      //     loadSecteurs(); // This would re-fetch all data, or search specifically
+      // }
+      // Currently, search operates on the already loaded 'secteurs' state (client-side)
+    }, 300);
 
     return () => clearTimeout(timeoutId);
   }, [searchTerm]);
@@ -140,35 +141,39 @@ export const useSecteursLogic = () => {
     if (!secteurToDelete) return;
 
     try {
-      await SecteursService.delete(secteurToDelete.id);
+      await SecteursService.delete(secteurToDelete.id); // Using the new service
       setIsDeleteModalOpen(false);
       setSecteurToDelete(null);
       handleModalClose();
-      loadSecteurs();
+      loadSecteurs(); // Reload data after successful delete
     } catch (error) {
       console.error('Failed to delete secteur:', error);
-      alert('Erreur lors de la suppression du secteur');
+      alert('Erreur lors de la suppression du secteur: ' + (error.response?.data?.message || error.message));
     }
   };
 
   const handleSave = async (secteurData) => {
     try {
       if (secteurData.id) {
-        await SecteursService.update(secteurData.id, secteurData);
+        await SecteursService.update(secteurData.id, secteurData); // Using the new service
       } else {
-        await SecteursService.create(secteurData);
+        await SecteursService.create(secteurData); // Using the new service
       }
       handleModalClose();
-      loadSecteurs();
+      loadSecteurs(); // Reload data after successful save/update
     } catch (error) {
       console.error('Failed to save secteur:', error);
-      throw new Error("Erreur lors de l'enregistrement du secteur");
+      // Throw the error with a more specific message for the UI to catch and display
+      throw new Error("Erreur lors de l'enregistrement du secteur: " + (error.response?.data?.message || error.message));
     }
   };
 
   const exportSecteurs = () => {
     const headers = ['code', 'Intitulé'];
-    const rows = filteredSecteurs.map((secteur) => [`"${secteur.intitule.replace(/"/g, '""')}"`]);
+    const rows = filteredSecteurs.map((secteur) => [
+      `"${secteur.code ? String(secteur.code).replace(/"/g, '""') : ''}"`,
+      `"${secteur.intitule ? String(secteur.intitule).replace(/"/g, '""') : ''}"`,
+    ]);
     const csvContent = [headers.join(','), ...rows.map((row) => row.join(','))].join('\n');
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');

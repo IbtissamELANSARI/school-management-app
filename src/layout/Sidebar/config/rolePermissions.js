@@ -1,6 +1,6 @@
 // Role permissions configuration
 const ROLE_PERMISSIONS = {
-  'super user': new Set([
+  'super-admin': new Set([
     'Accueil',
     'Cours',
     'Quiz',

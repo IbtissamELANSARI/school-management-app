@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
-import { Link, useNavigate, useLocation } from 'react-router';
+import { Link, useNavigate, useLocation } from 'react-router'; // Ensure react-router is used
 import { useDispatch, useSelector } from 'react-redux';
 import { Mail, Lock, AlertCircle, Loader2 } from 'lucide-react';
-import { login, clearError } from '../../auth/slices/authSlice';
+import { login, clearError } from '../../auth/slices/authSlice'; // Verify this path
 
 const LoginForm = () => {
   const navigate = useNavigate();
@@ -11,7 +11,7 @@ const LoginForm = () => {
 
   // Get auth states from Redux
   const isLoading = useSelector((state) => state.auth.status === 'loading');
-  const error = useSelector((state) => state.auth.error);
+  const error = useSelector((state) => state.auth.error); // This `error` comes from your Redux slice
   const isAuthenticated = useSelector((state) => state.auth.isAuthenticated);
 
   const [formData, setFormData] = useState({
@@ -20,7 +20,27 @@ const LoginForm = () => {
     rememberMe: false,
   });
 
-  // Clear any existing errors when component mounts or unmounts
+  // Local state for client-side validation errors (optional, but good for immediate feedback)
+  const [localErrors, setLocalErrors] = useState({});
+
+  // Handler for form field changes
+  const handleInputChange = (e) => {
+    const { name, value, type, checked } = e.target;
+    setFormData((prevData) => ({
+      ...prevData,
+      [name]: type === 'checkbox' ? checked : value,
+    }));
+    // Clear specific local error when input changes
+    if (localErrors[name]) {
+      setLocalErrors((prevErrors) => ({ ...prevErrors, [name]: '' }));
+    }
+    // Also clear global Redux error if input changes
+    if (error) {
+      dispatch(clearError());
+    }
+  };
+
+  // Clear any existing Redux errors when component mounts or unmounts
   useEffect(() => {
     dispatch(clearError());
     return () => dispatch(clearError());
@@ -35,11 +55,35 @@ const LoginForm = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+
+    // Basic client-side validation before dispatching to Redux
+    const currentErrors = {};
+    if (!formData.email) {
+      currentErrors.email = 'Email is required.';
+    } else if (!/\S+@\S+\.\S+/.test(formData.email)) {
+      currentErrors.email = 'Email format is invalid.';
+    }
+    if (!formData.password) {
+      currentErrors.password = 'Password is required.';
+    }
+
+    if (Object.keys(currentErrors).length > 0) {
+      setLocalErrors(currentErrors);
+      // If there are local errors, don't proceed with API call
+      return;
+    }
+
+    // Clear local errors before dispatching if validation passed
+    setLocalErrors({});
+    dispatch(clearError()); // Clear any previous Redux error before new attempt
+
     const resultAction = await dispatch(login(formData));
 
     if (login.fulfilled.match(resultAction)) {
+      // Login successful, navigate
       navigate(location.state?.from || '/home');
     }
+    // No explicit else for rejected, as the Redux error state will handle displaying it
   };
 
   return (
@@ -51,6 +95,7 @@ const LoginForm = () => {
           </h2>
           <p className="text-center text-base-content/60 mb-6">Please sign in to your account</p>
 
+          {/* Display Redux error (from API/Thunk) */}
           {error && (
             <div className="alert alert-error mb-6">
               <AlertCircle className="h-5 w-5" />
@@ -66,14 +111,21 @@ const LoginForm = () => {
               <div className="relative">
                 <input
                   type="email"
+                  name="email" // Add name attribute for easier handling
                   placeholder="your@email.com"
-                  className="input input-bordered w-full pl-10"
+                  className={`input input-bordered w-full pl-10 ${localErrors.email ? 'input-error' : ''}`}
                   value={formData.email}
-                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                  onChange={handleInputChange}
                   required
                 />
                 <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-base-content/40" />
               </div>
+              {/* Display local validation error for email */}
+              {localErrors.email && (
+                <label className="label">
+                  <span className="label-text-alt text-error">{localErrors.email}</span>
+                </label>
+              )}
             </div>
 
             <div className="form-control">
@@ -86,22 +138,30 @@ const LoginForm = () => {
               <div className="relative">
                 <input
                   type="password"
+                  name="password" // Add name attribute
                   placeholder="••••••••"
-                  className="input input-bordered w-full pl-10"
+                  className={`input input-bordered w-full pl-10 ${localErrors.password ? 'input-error' : ''}`}
                   value={formData.password}
-                  onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                  onChange={handleInputChange}
                   required
                 />
                 <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-base-content/40" />
               </div>
+              {/* Display local validation error for password */}
+              {localErrors.password && (
+                <label className="label">
+                  <span className="label-text-alt text-error">{localErrors.password}</span>
+                </label>
+              )}
             </div>
 
             <div className="flex items-center gap-2">
               <input
                 type="checkbox"
+                name="rememberMe" // Add name attribute
                 className="checkbox checkbox-primary"
                 checked={formData.rememberMe}
-                onChange={(e) => setFormData({ ...formData, rememberMe: e.target.checked })}
+                onChange={handleInputChange}
               />
               <span className="label-text">Remember me</span>
             </div>
@@ -119,7 +179,7 @@ const LoginForm = () => {
           </form>
 
           <p className="text-center mt-6">
-            Don't have an account?{' '}
+            Don&apos;t have an account?{' '}
             <Link to="/signup" className="link link-primary">
               Sign up
             </Link>

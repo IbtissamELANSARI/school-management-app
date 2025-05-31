@@ -1,4 +1,3 @@
-import React from 'react';
 import SecteursTable from './components/SecteursTable';
 import SecteursHeader from './components/SecteursHeader';
 import SecteursModal from './components/SecteursModal';
